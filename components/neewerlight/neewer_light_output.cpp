@@ -542,7 +542,7 @@ void NeewerRGBCTLightOutput::status_notifications_ready_() {
   ESP_LOGI(TAG, "Status notifications enabled");
   this->awaiting_power_status_ = false;
   this->awaiting_channel_status_ = false;
-  this->request_status_refresh_(true);
+  this->schedule_initial_status_refresh_();
 }
 
 void NeewerRGBCTLightOutput::status_notifications_lost_() {
@@ -634,3 +634,9 @@ void NeewerStateOutput::write_state(float state) {
 }  // namespace esphome
 
 #endif  // USE_ESP32
+void NeewerRGBCTLightOutput::schedule_initial_status_refresh_() {
+  if (this->initial_status_requested_)
+    return;
+  this->initial_status_requested_ = true;
+  this->request_status_refresh_(true);
+}

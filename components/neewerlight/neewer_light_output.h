@@ -107,10 +107,13 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     uint32_t last_power_request_ms_ = 0;
     uint32_t last_channel_request_ms_ = 0;
     static const uint32_t STATUS_TIMEOUT_MS = 2000;
+    bool initial_status_requested_ = false;
 
     const char* const TAG = "neewer_rgbct_light_output";
 
     bool did_rgb_change(float red, float green, float blue);
+    void schedule_initial_status_refresh_();
+    bool initial_status_requested_ = false;
     void loop() override;
     bool did_ctwb_change(float color_temperature, float white_brightness);
     bool did_only_wb_change(float color_temperature, float white_brightness);
