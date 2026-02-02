@@ -141,7 +141,6 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     uint32_t last_power_request_ms_ = 0;
     uint32_t last_channel_request_ms_ = 0;
     static const uint32_t STATUS_TIMEOUT_MS = 2000;
-    bool initial_status_requested_ = false;
     float kelvin_min_ = 3200.0f;
     float kelvin_max_ = 5600.0f;
     bool supports_gm_ = false;
