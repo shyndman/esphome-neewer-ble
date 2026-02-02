@@ -5,6 +5,13 @@
 namespace esphome {
 namespace neewerlight {
 
+namespace {
+constexpr uint8_t POWER_STATUS_REQUEST_TAG = 0x85;
+constexpr uint8_t CHANNEL_STATUS_REQUEST_TAG = 0x84;
+constexpr uint8_t POWER_STATUS_RESPONSE_TAG = 0x02;
+constexpr uint8_t CHANNEL_STATUS_RESPONSE_TAG = 0x01;
+}  // namespace
+
 void NeewerBLEOutput::dump_config() {
   ESP_LOGCONFIG(TAG, "Neewer BLE Output:");
   ESP_LOGCONFIG(TAG, "  MAC address        : %s", this->parent_->address_str().c_str());
@@ -22,11 +29,16 @@ void NeewerBLEOutput::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       this->client_state_ = espbt::ClientState::ESTABLISHED;
       ESP_LOGI(TAG, "BLE connection established to Neewer RGB660");
       ESP_LOGD(TAG, "Connection details - Interface: %d, Connection ID: %d", gattc_if, param->open.conn_id);
+      if (!this->notify_registered_ && this->register_for_notifications_(gattc_if)) {
+        this->status_notifications_ready_();
+      }
       break;
     case ESP_GATTC_DISCONNECT_EVT:
       ESP_LOGI(TAG, "BLE connection lost to Neewer RGB660 (reason: %d)", param->disconnect.reason);
       this->client_state_ = espbt::ClientState::IDLE;
       ESP_LOGD(TAG, "Client state reset to IDLE");
+      this->reset_notification_state_();
+      this->status_notifications_lost_();
       break;
     case ESP_GATTC_WRITE_CHAR_EVT: {
       if (param->write.status == 0) {
@@ -41,6 +53,13 @@ void NeewerBLEOutput::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       }
       if (param->write.handle == chr->handle) {
         ESP_LOGW(TAG, "BLE write failed: status=%d (handle: 0x%04X)", param->write.status, param->write.handle);
+      }
+      break;
+    }
+    case ESP_GATTC_NOTIFY_EVT: {
+      if (param->notify.handle == this->notify_handle_) {
+        ESP_LOGV(TAG, "Notify received (%d bytes)", param->notify.value_len);
+        this->handle_status_notification_(param->notify.value, param->notify.value_len);
       }
       break;
     }
@@ -117,6 +136,50 @@ NeewerBLEOutput::NeewerBLEOutput() {
   orig_msg_ = (uint8_t*) malloc (MSG_MAX_SIZE);
   this->orig_msg_clear();
 };
+
+bool NeewerBLEOutput::register_for_notifications_(esp_gatt_if_t gattc_if) {
+  if (this->notify_registered_)
+    return true;
+
+  auto *chr = this->parent()->get_characteristic(this->service_uuid_, this->notify_char_uuid_);
+  if (chr == nullptr) {
+    ESP_LOGW(TAG, "Notify characteristic not found for Neewer status updates");
+    return false;
+  }
+
+  auto *descr = this->parent()->get_descriptor(this->service_uuid_, this->notify_char_uuid_, this->cccd_uuid_);
+  if (descr == nullptr) {
+    ESP_LOGW(TAG, "CCCD descriptor missing for Neewer status notifications");
+    return false;
+  }
+
+  esp_err_t reg_status = esp_ble_gattc_register_for_notify(gattc_if, this->parent()->get_remote_bda(), chr->handle);
+  if (reg_status != ESP_OK) {
+    ESP_LOGW(TAG, "esp_ble_gattc_register_for_notify failed, status=%d", reg_status);
+    return false;
+  }
+
+  uint8_t notify_en[2] = {0x01, 0x00};
+  esp_err_t descr_status = esp_ble_gattc_write_char_descr(gattc_if, this->parent()->get_conn_id(), descr->handle,
+                                                          sizeof(notify_en), notify_en, ESP_GATT_WRITE_TYPE_RSP,
+                                                          ESP_GATT_AUTH_REQ_NONE);
+  if (descr_status != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to enable notify descriptor, status=%d", descr_status);
+    return false;
+  }
+
+  this->notify_handle_ = chr->handle;
+  this->notify_cccd_handle_ = descr->handle;
+  this->notify_registered_ = true;
+  ESP_LOGD(TAG, "Registered for status notifications (handle: 0x%04X)", this->notify_handle_);
+  return true;
+}
+
+void NeewerBLEOutput::reset_notification_state_() {
+  this->notify_registered_ = false;
+  this->notify_handle_ = 0;
+  this->notify_cccd_handle_ = 0;
+}
 
 void NeewerRGBCTLightOutput::dump_config() {
   ESP_LOGCONFIG(TAG, "Neewer RGBCT Light Output:");
@@ -204,6 +267,17 @@ void NeewerRGBCTLightOutput::send_power_command_(bool power_on) {
   NeewerBLEOutput::write_state(power_on ? 1.0f : 0.0f);
   this->light_on_ = power_on;
 };
+
+void NeewerRGBCTLightOutput::prepare_status_msg_(uint8_t request_tag) {
+  this->orig_msg_clear();
+
+  this->orig_msg_[0] = this->command_prefix_;
+  this->orig_msg_[1] = request_tag;
+  this->orig_msg_[2] = 0x00;
+  this->orig_msg_len_ = 3;
+
+  NeewerBLEOutput::build_msg_with_checksum();
+}
 
 void NeewerRGBCTLightOutput::prepare_rgb_msg(float red, float green, float blue) {
   ESP_LOGD(TAG, "Building RGB message: R=%.2f G=%.2f B=%.2f", red, green, blue);
@@ -332,12 +406,14 @@ void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
   if (!target_on) {
     ESP_LOGI(TAG, "-> POWER OFF: Light requested to turn off");
     this->send_power_command_(false);
+    this->request_status_refresh_(false);
     this->set_old_rgbct(0.0f, 0.0f, 0.0f, color_temperature, 0.0f);
     return;
   }
 
   if (!this->light_on_) {
     this->send_power_command_(true);
+    this->request_status_refresh_(false);
   }
 
   // Prep values for logic to determine which mode we need to change
@@ -398,11 +474,19 @@ void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
   // Message having been prepared, we can send it off into the sunset.
   ESP_LOGD(TAG, "Sending prepared message to BLE layer...");
   NeewerBLEOutput::write_state(1.0);
+  if (!this->status_query_active_) {
+    this->request_status_refresh_(true);
+  }
 
   // We're probably done with the old values now, so let's change them up.
   ESP_LOGD(TAG, "Updating stored previous values for next comparison");
   this->set_old_rgbct(red, green, blue, color_temperature, white_brightness);
 };
+
+void NeewerRGBCTLightOutput::loop() {
+  NeewerBLEOutput::loop();
+  this->check_status_timeouts_();
+}
 
 void NeewerRGBCTLightOutput::set_old_rgbct(float red, float green, float blue, float color_temperature,
                                            float white_brightness) {
@@ -419,9 +503,106 @@ void NeewerRGBCTLightOutput::set_old_rgbct(float red, float green, float blue, f
   this->white_brightness_->set_level(white_brightness);
 }
 
+void NeewerRGBCTLightOutput::request_power_status_(bool force) {
+  if (!this->notify_registered_ || this->client_state_ != espbt::ClientState::ESTABLISHED)
+    return;
+  if (!force && this->awaiting_power_status_)
+    return;
+
+  this->prepare_status_msg_(POWER_STATUS_REQUEST_TAG);
+  this->status_query_active_ = true;
+  NeewerBLEOutput::write_state(1.0f);
+  this->status_query_active_ = false;
+  this->awaiting_power_status_ = true;
+  this->last_power_request_ms_ = millis();
+}
+
+void NeewerRGBCTLightOutput::request_channel_status_(bool force) {
+  if (!this->notify_registered_ || this->client_state_ != espbt::ClientState::ESTABLISHED)
+    return;
+  if (!force && this->awaiting_channel_status_)
+    return;
+
+  this->prepare_status_msg_(CHANNEL_STATUS_REQUEST_TAG);
+  this->status_query_active_ = true;
+  NeewerBLEOutput::write_state(1.0f);
+  this->status_query_active_ = false;
+  this->awaiting_channel_status_ = true;
+  this->last_channel_request_ms_ = millis();
+}
+
+void NeewerRGBCTLightOutput::request_status_refresh_(bool include_channel) {
+  this->request_power_status_();
+  if (include_channel) {
+    this->request_channel_status_();
+  }
+}
+
+void NeewerRGBCTLightOutput::status_notifications_ready_() {
+  ESP_LOGI(TAG, "Status notifications enabled");
+  this->awaiting_power_status_ = false;
+  this->awaiting_channel_status_ = false;
+  this->request_status_refresh_(true);
+}
+
+void NeewerRGBCTLightOutput::status_notifications_lost_() {
+  this->awaiting_power_status_ = false;
+  this->awaiting_channel_status_ = false;
+}
+
+void NeewerRGBCTLightOutput::handle_status_notification_(const uint8_t *data, uint16_t length) {
+  if (length < 4) {
+    ESP_LOGW(TAG, "Status notify payload too short (%u bytes)", length);
+    return;
+  }
+
+  const uint8_t response_type = data[1];
+  const uint8_t payload = data[3];
+
+  if (response_type == POWER_STATUS_RESPONSE_TAG) {
+    this->awaiting_power_status_ = false;
+    this->handle_power_status_response_(payload);
+  } else if (response_type == CHANNEL_STATUS_RESPONSE_TAG) {
+    this->awaiting_channel_status_ = false;
+    this->handle_channel_status_response_(payload);
+  } else {
+    ESP_LOGW(TAG, "Unknown status notify type: 0x%02X", response_type);
+  }
+}
+
+void NeewerRGBCTLightOutput::handle_power_status_response_(uint8_t raw_state) {
+  if (raw_state == 0x01) {
+    this->light_on_ = true;
+    ESP_LOGD(TAG, "Power status confirmed: ON");
+  } else if (raw_state == 0x02) {
+    this->light_on_ = false;
+    ESP_LOGD(TAG, "Power status confirmed: STANDBY");
+  } else {
+    ESP_LOGW(TAG, "Unexpected power status value: 0x%02X", raw_state);
+  }
+}
+
+void NeewerRGBCTLightOutput::handle_channel_status_response_(uint8_t channel) {
+  this->channel_id_ = channel;
+  ESP_LOGD(TAG, "Channel status: %u", static_cast<unsigned>(channel));
+}
+
+void NeewerRGBCTLightOutput::check_status_timeouts_() {
+  const uint32_t now = millis();
+  if (this->awaiting_power_status_ && now - this->last_power_request_ms_ > STATUS_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Power status request timed out");
+    this->awaiting_power_status_ = false;
+  }
+  if (this->awaiting_channel_status_ && now - this->last_channel_request_ms_ > STATUS_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Channel status request timed out");
+    this->awaiting_channel_status_ = false;
+  }
+}
+
 NeewerRGBCTLightOutput::NeewerRGBCTLightOutput() {
   this->set_service_uuid_str(SERVICE_UUID);
   this->set_char_uuid_str(CHARACTERISTIC_UUID);
+  this->set_notify_char_uuid_str(NOTIFY_CHARACTERISTIC_UUID);
 
   // RGBCT-specific light settings
   this->set_red(new NeewerStateOutput());
