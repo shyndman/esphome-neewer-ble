@@ -186,6 +186,25 @@ void NeewerRGBCTLightOutput::prepare_wb_msg(float white_brightness) {
   NeewerBLEOutput::build_msg_with_checksum();
 };
 
+void NeewerRGBCTLightOutput::prepare_power_msg_(bool power_on) {
+  this->orig_msg_clear();
+
+  this->orig_msg_[0] = this->command_prefix_;
+  this->orig_msg_[1] = this->power_prefix_;
+  this->orig_msg_[2] = 0x01;
+  this->orig_msg_[3] = power_on ? 0x01 : 0x02;
+  this->orig_msg_len_ = 4;
+
+  NeewerBLEOutput::build_msg_with_checksum();
+};
+
+void NeewerRGBCTLightOutput::send_power_command_(bool power_on) {
+  ESP_LOGI(TAG, "-> POWER %s: Sending BLE power command", power_on ? "ON" : "OFF");
+  this->prepare_power_msg_(power_on);
+  NeewerBLEOutput::write_state(power_on ? 1.0f : 0.0f);
+  this->light_on_ = power_on;
+};
+
 void NeewerRGBCTLightOutput::prepare_rgb_msg(float red, float green, float blue) {
   ESP_LOGD(TAG, "Building RGB message: R=%.2f G=%.2f B=%.2f", red, green, blue);
   
@@ -305,9 +324,21 @@ void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
   float red, green, blue, color_temperature, white_brightness;
 
   state->current_values_as_rgbct(&red, &green, &blue, &color_temperature, &white_brightness);
-  
+  const bool target_on = state->current_values.is_on();
+
   ESP_LOGD(TAG, "Light state update: RGB(%.2f,%.2f,%.2f) CT=%.0fK WB=%.1f%%", 
            red, green, blue, color_temperature, white_brightness * 100);
+
+  if (!target_on) {
+    ESP_LOGI(TAG, "-> POWER OFF: Light requested to turn off");
+    this->send_power_command_(false);
+    this->set_old_rgbct(0.0f, 0.0f, 0.0f, color_temperature, 0.0f);
+    return;
+  }
+
+  if (!this->light_on_) {
+    this->send_power_command_(true);
+  }
 
   // Prep values for logic to determine which mode we need to change
   bool rgb_changed = this->did_rgb_change(red, green, blue);
@@ -370,19 +401,23 @@ void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
 
   // We're probably done with the old values now, so let's change them up.
   ESP_LOGD(TAG, "Updating stored previous values for next comparison");
+  this->set_old_rgbct(red, green, blue, color_temperature, white_brightness);
+};
+
+void NeewerRGBCTLightOutput::set_old_rgbct(float red, float green, float blue, float color_temperature,
+                                           float white_brightness) {
   this->old_red_ = red;
   this->old_green_ = green;
   this->old_blue_ = blue;
   this->old_color_temperature_ = color_temperature;
   this->old_white_brightness_ = white_brightness;
 
-  // Do whatever else setting the current levels individually accomplishes
   this->red_->set_level(red);
   this->green_->set_level(green);
   this->blue_->set_level(blue);
   this->color_temperature_->set_level(color_temperature);
   this->white_brightness_->set_level(white_brightness);
-};
+}
 
 NeewerRGBCTLightOutput::NeewerRGBCTLightOutput() {
   this->set_service_uuid_str(SERVICE_UUID);

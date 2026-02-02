@@ -61,6 +61,7 @@ class NeewerBLEOutput : public Component, public output::FloatOutput, public ble
     bool command_block_ = false;
 
     const uint8_t command_prefix_ = 0x78;
+    const uint8_t power_prefix_ = 0x81;
     const uint8_t rgb_prefix_ = 0x86;
     const uint8_t ctwb_prefix_ = 0x87;
     const uint8_t effect_prefix_ = 0x88;
@@ -85,6 +86,7 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     float old_blue_ = 0.0;
     float old_white_brightness_ = 0.0;
     float old_color_temperature_ = 0.0;
+    bool light_on_ = false;
 
     const char* const TAG = "neewer_rgbct_light_output";
 
@@ -94,6 +96,8 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     void prepare_ctwb_msg(float color_temperature, float white_brightness);
     void prepare_rgb_msg(float red, float green, float blue);
     void prepare_wb_msg(float white_brightness);
+    void prepare_power_msg_(bool power_on);
+    void send_power_command_(bool power_on);
     void set_old_rgbct(float red, float green, float blue, float color_temperature, float white_brightness);
     void write_state(light::LightState *state) override;
 };
