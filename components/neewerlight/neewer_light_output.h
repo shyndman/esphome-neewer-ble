@@ -4,6 +4,7 @@
 #include "esphome/components/ble_client/ble_client.h"
 #include "esphome/components/rgbct/rgbct_light_output.h"
 #include "esphome/components/output/float_output.h"
+#include "esphome/components/light/light_effect.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
@@ -21,6 +22,30 @@ static const char *const NOTIFY_CHARACTERISTIC_UUID = "69400003-B5A3-F393-E0A9-E
 static const int MSG_MAX_SIZE = 20;  // size of msg_ string to reserve in bytes (uint8_t*).
 static const float COLD_WHITE = 178.6;  // 5600 K
 static const float WARM_WHITE = 312.5;  // 3200 K
+
+enum class NeewerSceneParamKind : uint8_t {
+    BRR,
+    BRR2,
+    CCT,
+    CCT2,
+    GM,
+    SPEED,
+    SPARKS,
+    HUE16,
+    SAT,
+    COLOR,
+};
+
+struct NeewerSceneParamSpec {
+    NeewerSceneParamKind kind;
+};
+
+struct NeewerSceneDefinition {
+    uint8_t scene_id;
+    const char *name;
+    const NeewerSceneParamSpec *params;
+    uint8_t param_count;
+};
 
 class NeewerBLEOutput : public Component, public output::FloatOutput, public ble_client::BLEClientNode {
  public:
@@ -97,6 +122,10 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
       this->kelvin_max_ = max_kelvin;
     }
     void set_supports_green_magenta(bool enabled) { this->supports_gm_ = enabled; }
+    void set_green_magenta_bias(float bias) {
+      this->green_magenta_bias_ = clamp(bias, -50.0f, 50.0f);
+    }
+    bool activate_scene(uint8_t scene_id);
 
   protected:
     float old_red_ = 0.0;
@@ -116,6 +145,10 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     float kelvin_min_ = 3200.0f;
     float kelvin_max_ = 5600.0f;
     bool supports_gm_ = false;
+    float green_magenta_bias_ = 0.0f;
+    uint16_t last_hue_degrees_ = 0;
+    uint8_t last_saturation_percent_ = 100;
+    float last_rgb_brightness_fraction_ = 0.0f;
 
     const char* const TAG = "neewer_rgbct_light_output";
 
@@ -140,8 +173,27 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     void handle_power_status_response_(uint8_t raw_state);
     void handle_channel_status_response_(uint8_t channel);
     void check_status_timeouts_();
+    bool build_scene_message_(const NeewerSceneDefinition &definition);
+    uint8_t current_brightness_byte_(bool secondary = false) const;
+    uint8_t convert_kelvin_to_scene_byte_(float kelvin) const;
+    uint16_t current_hue_degrees_() const;
+    uint8_t current_saturation_percent_() const;
+    uint8_t gm_bias_byte_() const;
+    uint8_t default_speed_byte_() const;
+    uint8_t default_sparks_byte_() const;
+    uint8_t default_color_byte_() const;
     void set_old_rgbct(float red, float green, float blue, float color_temperature, float white_brightness);
     void write_state(light::LightState *state) override;
+};
+
+class NeewerSceneLightEffect : public light::LightEffect {
+ public:
+  NeewerSceneLightEffect(const char *name, uint8_t scene_id) : light::LightEffect(name), scene_id_(scene_id) {}
+  void apply() override {}
+  void start() override;
+
+ private:
+  uint8_t scene_id_;
 };
 
 }  // namespace esphome

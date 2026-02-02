@@ -10,6 +10,76 @@ constexpr uint8_t POWER_STATUS_REQUEST_TAG = 0x85;
 constexpr uint8_t CHANNEL_STATUS_REQUEST_TAG = 0x84;
 constexpr uint8_t POWER_STATUS_RESPONSE_TAG = 0x02;
 constexpr uint8_t CHANNEL_STATUS_RESPONSE_TAG = 0x01;
+constexpr uint8_t FX_SUBTAG = 0x8B;
+
+const NeewerSceneParamSpec FX1_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX2_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX3_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX4_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+    {NeewerSceneParamKind::SPARKS},
+};
+const NeewerSceneParamSpec FX5_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX6_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX7_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::HUE16},
+    {NeewerSceneParamKind::SAT},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX8_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::CCT},
+    {NeewerSceneParamKind::GM},
+    {NeewerSceneParamKind::SPEED},
+};
+const NeewerSceneParamSpec FX9_PARAMS[] = {
+    {NeewerSceneParamKind::BRR},
+    {NeewerSceneParamKind::HUE16},
+    {NeewerSceneParamKind::SAT},
+    {NeewerSceneParamKind::SPEED},
+};
+
+const NeewerSceneDefinition NEEWER_SIMPLE_SCENES[] = {
+    {1, "Neewer FX • Lighting", FX1_PARAMS, static_cast<uint8_t>(sizeof(FX1_PARAMS) / sizeof(FX1_PARAMS[0]))},
+    {2, "Neewer FX • Paparazzi", FX2_PARAMS, static_cast<uint8_t>(sizeof(FX2_PARAMS) / sizeof(FX2_PARAMS[0]))},
+    {3, "Neewer FX • Defective Bulb", FX3_PARAMS, static_cast<uint8_t>(sizeof(FX3_PARAMS) / sizeof(FX3_PARAMS[0]))},
+    {4, "Neewer FX • Explosion", FX4_PARAMS, static_cast<uint8_t>(sizeof(FX4_PARAMS) / sizeof(FX4_PARAMS[0]))},
+    {5, "Neewer FX • Welding", FX5_PARAMS, static_cast<uint8_t>(sizeof(FX5_PARAMS) / sizeof(FX5_PARAMS[0]))},
+    {6, "Neewer FX • CCT Flash", FX6_PARAMS, static_cast<uint8_t>(sizeof(FX6_PARAMS) / sizeof(FX6_PARAMS[0]))},
+    {7, "Neewer FX • Hue Flash", FX7_PARAMS, static_cast<uint8_t>(sizeof(FX7_PARAMS) / sizeof(FX7_PARAMS[0]))},
+    {8, "Neewer FX • CCT Pulse", FX8_PARAMS, static_cast<uint8_t>(sizeof(FX8_PARAMS) / sizeof(FX8_PARAMS[0]))},
+    {9, "Neewer FX • Hue Pulse", FX9_PARAMS, static_cast<uint8_t>(sizeof(FX9_PARAMS) / sizeof(FX9_PARAMS[0]))},
+};
+
+constexpr size_t NEEWER_SIMPLE_SCENE_COUNT = sizeof(NEEWER_SIMPLE_SCENES) / sizeof(NEEWER_SIMPLE_SCENES[0]);
 }  // namespace
 
 void NeewerBLEOutput::dump_config() {
@@ -225,8 +295,9 @@ void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float whi
     const float span = this->kelvin_max_ - this->kelvin_min_;
     const float normalized = span > 0.0f ? (clamped_kelvin - this->kelvin_min_) / span : 0.0f;
     ct_byte = static_cast<uint8_t>(roundf(normalized * 60.0f) + 25.0f);
-    gm_byte = 50;  // neutral GM until we expose control in ESPHome
-    ESP_LOGD(TAG, "Converted RGB62 CT=%.0fK -> byte=%u GM=%u", clamped_kelvin, ct_byte, gm_byte);
+    gm_byte = static_cast<uint8_t>(roundf(clamp(this->green_magenta_bias_ + 50.0f, 0.0f, 100.0f)));
+    ESP_LOGD(TAG, "Converted RGB62 CT=%.0fK -> byte=%u GM=%u (bias %.1f)", clamped_kelvin, ct_byte, gm_byte,
+             this->green_magenta_bias_);
   } else {
     ct_byte = (uint8_t) abs((color_temperature * 24.0f) - 56.0f);
     ESP_LOGD(TAG, "Converted legacy CT=0x%02X", ct_byte);
@@ -310,6 +381,9 @@ void NeewerRGBCTLightOutput::prepare_rgb_msg(float red, float green, float blue)
 
   // Surprise, the "RGB" light isn't actually RGB!
   this->rgb_to_hsb(red, green, blue, &hue, &saturation, &brightness);
+  this->last_hue_degrees_ = static_cast<uint16_t>(clamp(hue, 0, 360));
+  this->last_saturation_percent_ = saturation;
+  this->last_rgb_brightness_fraction_ = brightness / 100.0f;
   
   ESP_LOGD(TAG, "Converted to HSB: H=%d° S=%d%% B=%d%%", hue, saturation, brightness);
 
@@ -525,6 +599,150 @@ void NeewerRGBCTLightOutput::set_old_rgbct(float red, float green, float blue, f
   this->white_brightness_->set_level(white_brightness);
 }
 
+bool NeewerRGBCTLightOutput::activate_scene(uint8_t scene_id) {
+  const NeewerSceneDefinition *definition = nullptr;
+  for (size_t i = 0; i < NEEWER_SIMPLE_SCENE_COUNT; i++) {
+    if (NEEWER_SIMPLE_SCENES[i].scene_id == scene_id) {
+      definition = &NEEWER_SIMPLE_SCENES[i];
+      break;
+    }
+  }
+  if (definition == nullptr) {
+    ESP_LOGW(TAG, "Scene id %u not supported", scene_id);
+    return false;
+  }
+  if (!this->build_scene_message_(*definition)) {
+    ESP_LOGW(TAG, "Unable to build scene payload for id %u", scene_id);
+    return false;
+  }
+  ESP_LOGI(TAG, "Activating scene '%s' (id %u)", definition->name, scene_id);
+  NeewerBLEOutput::write_state(1.0f);
+  this->request_status_refresh_(false);
+  return true;
+}
+
+bool NeewerRGBCTLightOutput::build_scene_message_(const NeewerSceneDefinition &definition) {
+  this->orig_msg_clear();
+  this->orig_msg_[0] = this->command_prefix_;
+  this->orig_msg_[1] = FX_SUBTAG;
+  uint8_t index = 3;
+  this->orig_msg_[index++] = definition.scene_id;
+
+  for (uint8_t i = 0; i < definition.param_count; i++) {
+    const auto &spec = definition.params[i];
+    switch (spec.kind) {
+      case NeewerSceneParamKind::BRR:
+        this->orig_msg_[index++] = this->current_brightness_byte_();
+        break;
+      case NeewerSceneParamKind::BRR2:
+        this->orig_msg_[index++] = this->current_brightness_byte_(true);
+        break;
+      case NeewerSceneParamKind::CCT:
+        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(this->old_color_temperature_);
+        break;
+      case NeewerSceneParamKind::CCT2:
+        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(this->old_color_temperature_);
+        break;
+      case NeewerSceneParamKind::GM:
+        this->orig_msg_[index++] = this->gm_bias_byte_();
+        break;
+      case NeewerSceneParamKind::SPEED:
+        this->orig_msg_[index++] = this->default_speed_byte_();
+        break;
+      case NeewerSceneParamKind::SPARKS:
+        this->orig_msg_[index++] = this->default_sparks_byte_();
+        break;
+      case NeewerSceneParamKind::HUE16: {
+        uint16_t hue = this->current_hue_degrees_();
+        this->orig_msg_[index++] = static_cast<uint8_t>(hue & 0xFF);
+        this->orig_msg_[index++] = static_cast<uint8_t>((hue >> 8) & 0xFF);
+        break;
+      }
+      case NeewerSceneParamKind::SAT:
+        this->orig_msg_[index++] = this->current_saturation_percent_();
+        break;
+      case NeewerSceneParamKind::COLOR:
+        this->orig_msg_[index++] = this->default_color_byte_();
+        break;
+    }
+    if (index >= MSG_MAX_SIZE - 1) {
+      ESP_LOGW(TAG, "Scene payload would overflow buffer");
+      return false;
+    }
+  }
+
+  this->orig_msg_[2] = index - 3;
+  this->orig_msg_len_ = index;
+  NeewerBLEOutput::build_msg_with_checksum();
+  return true;
+}
+
+uint8_t NeewerRGBCTLightOutput::current_brightness_byte_(bool secondary) const {
+  auto clamp_byte = [](int value) -> uint8_t {
+    if (value < 1)
+      value = 1;
+    if (value > 100)
+      value = 100;
+    return static_cast<uint8_t>(value);
+  };
+  int primary = static_cast<int>(roundf(this->old_white_brightness_ * 100.0f));
+  if (primary <= 0) {
+    primary = static_cast<int>(roundf(this->last_rgb_brightness_fraction_ * 100.0f));
+  }
+  if (primary <= 0)
+    primary = 50;
+  if (!secondary)
+    return clamp_byte(primary);
+  int secondary_value = primary - 10;
+  if (secondary_value < 1)
+    secondary_value = primary;
+  return clamp_byte(secondary_value);
+}
+
+uint8_t NeewerRGBCTLightOutput::convert_kelvin_to_scene_byte_(float kelvin) const {
+  float effective = kelvin;
+  if (effective <= 0.0f)
+    effective = (this->kelvin_min_ + this->kelvin_max_) / 2.0f;
+  effective = clamp(effective, this->kelvin_min_, this->kelvin_max_);
+  const float span = this->kelvin_max_ - this->kelvin_min_;
+  const float normalized = span > 0.0f ? (effective - this->kelvin_min_) / span : 0.5f;
+  int mapped = static_cast<int>(roundf(29.0f + normalized * (70.0f - 29.0f)));
+  if (mapped < 29)
+    mapped = 29;
+  if (mapped > 70)
+    mapped = 70;
+  return static_cast<uint8_t>(mapped);
+}
+
+uint16_t NeewerRGBCTLightOutput::current_hue_degrees_() const {
+  if (this->last_hue_degrees_ == 0 && this->old_red_ == 0.0f && this->old_green_ == 0.0f && this->old_blue_ == 0.0f)
+    return 0;
+  return clamp<uint16_t>(this->last_hue_degrees_, 0, 360);
+}
+
+uint8_t NeewerRGBCTLightOutput::current_saturation_percent_() const {
+  if (this->last_saturation_percent_ == 0)
+    return 0;
+  if (this->last_saturation_percent_ > 100)
+    return 100;
+  return this->last_saturation_percent_;
+}
+
+uint8_t NeewerRGBCTLightOutput::gm_bias_byte_() const {
+  float gm = this->green_magenta_bias_ + 50.0f;
+  if (gm < 0.0f)
+    gm = 0.0f;
+  if (gm > 100.0f)
+    gm = 100.0f;
+  return static_cast<uint8_t>(roundf(gm));
+}
+
+uint8_t NeewerRGBCTLightOutput::default_speed_byte_() const { return 5; }
+
+uint8_t NeewerRGBCTLightOutput::default_sparks_byte_() const { return 5; }
+
+uint8_t NeewerRGBCTLightOutput::default_color_byte_() const { return 0; }
+
 void NeewerRGBCTLightOutput::request_power_status_(bool force) {
   if (!this->notify_registered_ || this->client_state_ != espbt::ClientState::ESTABLISHED)
     return;
@@ -619,6 +837,16 @@ void NeewerRGBCTLightOutput::check_status_timeouts_() {
     ESP_LOGW(TAG, "Channel status request timed out");
     this->awaiting_channel_status_ = false;
   }
+}
+
+void NeewerSceneLightEffect::start() {
+  auto *state = this->get_light_state();
+  if (state == nullptr)
+    return;
+  auto *output = static_cast<NeewerRGBCTLightOutput *>(state->get_output());
+  if (output == nullptr)
+    return;
+  output->activate_scene(this->scene_id_);
 }
 
 NeewerRGBCTLightOutput::NeewerRGBCTLightOutput() {
