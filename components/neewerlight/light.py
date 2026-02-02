@@ -1,10 +1,10 @@
 import esphome.codegen as cg
-import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import ble_client, light
 from esphome.components.rgbct import light as rgbct_light
 from esphome.components.neewerlight import output as nw_output
 from esphome.components.light import effects as light_effects
+from esphome.components.light.types import LightEffect
 from esphome.const import (
     CONF_COLOR_INTERLOCK,
     CONF_EFFECTS,
@@ -20,9 +20,7 @@ MODEL_RGB62 = "rgb62"
 
 neewerlight_ns = cg.esphome_ns.namespace("neewerlight")
 
-NeewerSceneLightEffect = neewerlight_ns.class_(
-    "NeewerSceneLightEffect", light.LightEffect
-)
+NeewerSceneLightEffect = neewerlight_ns.class_("NeewerSceneLightEffect", LightEffect)
 
 
 @light_effects.register_rgb_effect(
@@ -49,22 +47,23 @@ RGB62_SCENE_PRESETS = [
 ]
 
 
-def _ensure_scene_effects(config):
-    effects = config.setdefault(CONF_EFFECTS, [])
+def _inject_scene_effects(value):
+    if value.get(CONF_MODEL) != MODEL_RGB62:
+        return value
 
-    def has_scene(scene_id):
-        for entry in effects:
-            if (
-                "neewer_scene" in entry
-                and entry["neewer_scene"].get("scene_id") == scene_id
-            ):
-                return True
-        return False
+    effects = value.setdefault(CONF_EFFECTS, [])
+    existing = {
+        entry.get("neewer_scene", {}).get("scene_id")
+        for entry in effects
+        if isinstance(entry, dict) and "neewer_scene" in entry
+    }
 
     for scene_id, name in RGB62_SCENE_PRESETS:
-        if has_scene(scene_id):
+        if scene_id in existing:
             continue
         effects.append({"neewer_scene": {CONF_NAME: name, "scene_id": scene_id}})
+
+    return value
 
 
 DEPENDENCIES = ["ble_client"]
@@ -79,7 +78,7 @@ NeewerRGBCTLightOutput = neewerlight_ns.class_(
     nw_output.NeewerBLEOutput,
 )
 
-CONFIG_SCHEMA = cv.All(
+_BASE_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(CONF_OUTPUT_ID): cv.declare_id(NeewerRGBCTLightOutput),
@@ -98,11 +97,10 @@ CONFIG_SCHEMA = cv.All(
     .extend(cv.COMPONENT_SCHEMA)
 )
 
+CONFIG_SCHEMA = cv.All(_inject_scene_effects, _BASE_SCHEMA)
+
 
 async def to_code(config):
-    if config[CONF_MODEL] == MODEL_RGB62:
-        _ensure_scene_effects(config)
-
     var = cg.new_Pvariable(config[CONF_OUTPUT_ID])
     await light.register_light(var, config)
 

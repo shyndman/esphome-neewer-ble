@@ -790,6 +790,13 @@ void NeewerRGBCTLightOutput::status_notifications_lost_() {
   this->awaiting_channel_status_ = false;
 }
 
+void NeewerRGBCTLightOutput::schedule_initial_status_refresh_() {
+  if (this->initial_status_requested_)
+    return;
+  this->initial_status_requested_ = true;
+  this->request_status_refresh_(true);
+}
+
 void NeewerRGBCTLightOutput::handle_status_notification_(const uint8_t *data, uint16_t length) {
   if (length < 4) {
     ESP_LOGW(TAG, "Status notify payload too short (%u bytes)", length);
@@ -884,9 +891,3 @@ void NeewerStateOutput::write_state(float state) {
 }  // namespace esphome
 
 #endif  // USE_ESP32
-void NeewerRGBCTLightOutput::schedule_initial_status_refresh_() {
-  if (this->initial_status_requested_)
-    return;
-  this->initial_status_requested_ = true;
-  this->request_status_refresh_(true);
-}
