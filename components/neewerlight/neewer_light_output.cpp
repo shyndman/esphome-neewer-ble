@@ -215,20 +215,42 @@ bool NeewerRGBCTLightOutput::did_only_wb_change(float color_temperature, float w
 void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float white_brightness) {
   ESP_LOGD(TAG, "Building CTWB message: CT=%.0fK brightness=%.1f%%", color_temperature, white_brightness * 100);
   
-  uint8_t ct = (uint8_t) abs((color_temperature * 24.0) - 56.0);
   uint8_t wb = (uint8_t) (white_brightness * 100.0);
-  
-  ESP_LOGD(TAG, "Converted to device values: CT=0x%02X WB=0x%02X", ct, wb);
+  uint8_t ct_byte;
+  uint8_t gm_byte = 0;
+  bool include_gm = this->supports_gm_;
+
+  if (include_gm) {
+    const float clamped_kelvin = clamp(color_temperature, this->kelvin_min_, this->kelvin_max_);
+    const float span = this->kelvin_max_ - this->kelvin_min_;
+    const float normalized = span > 0.0f ? (clamped_kelvin - this->kelvin_min_) / span : 0.0f;
+    ct_byte = static_cast<uint8_t>(roundf(normalized * 60.0f) + 25.0f);
+    gm_byte = 50;  // neutral GM until we expose control in ESPHome
+    ESP_LOGD(TAG, "Converted RGB62 CT=%.0fK -> byte=%u GM=%u", clamped_kelvin, ct_byte, gm_byte);
+  } else {
+    ct_byte = (uint8_t) abs((color_temperature * 24.0f) - 56.0f);
+    ESP_LOGD(TAG, "Converted legacy CT=0x%02X", ct_byte);
+  }
 
   this->orig_msg_clear();
 
   // Prepare string for write_state.
   this->orig_msg_[0] = this->command_prefix_;        // 0x78
   this->orig_msg_[1] = this->ctwb_prefix_;           // 0x86
-  this->orig_msg_[2] = 2;                            // Byte Count = 2 for ctwb
-  this->orig_msg_[3] = wb;                           // brightness 0x00 - 0x64
-  this->orig_msg_[4] = ct;                           // color_temp 0x20 - 0x38
-  this->orig_msg_len_ = 5;
+  if (include_gm) {
+    this->orig_msg_[2] = 4;
+    this->orig_msg_[3] = wb;
+    this->orig_msg_[4] = ct_byte;
+    this->orig_msg_[5] = gm_byte;
+    this->orig_msg_[6] = 0x00;
+    this->orig_msg_[7] = 0x00;
+    this->orig_msg_len_ = 8;
+  } else {
+    this->orig_msg_[2] = 2;
+    this->orig_msg_[3] = wb;
+    this->orig_msg_[4] = ct_byte;
+    this->orig_msg_len_ = 5;
+  }
 
   NeewerBLEOutput::build_msg_with_checksum();
 };

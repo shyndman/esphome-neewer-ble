@@ -10,6 +10,9 @@ from esphome.const import (
     CONF_OUTPUT_ID,
 )
 
+CONF_MODEL = "model"
+MODEL_RGB62 = "rgb62"
+
 DEPENDENCIES = ["ble_client"]
 AUTO_LOAD = ["output", "rgbct"]
 IS_PLATFORM_COMPONENT = True
@@ -31,6 +34,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(ble_client.CONF_BLE_CLIENT_ID): cv.use_id(ble_client.BLEClient),
             cv.Optional(CONF_GAMMA_CORRECT, default=1.0): cv.positive_float,
             cv.Optional(CONF_COLOR_INTERLOCK, default=True): cv.boolean,
+            cv.Required(CONF_MODEL): cv.one_of(MODEL_RGB62, lower=True),
         }
     )
     .extend(cv.ENTITY_BASE_SCHEMA)
@@ -46,3 +50,8 @@ async def to_code(config):
     await ble_client.register_ble_node(var, config)
 
     cg.add(var.set_color_interlock(config[CONF_COLOR_INTERLOCK]))
+    cg.add(var.set_kelvin_range(3200.0, 5600.0))
+    cg.add(var.set_supports_green_magenta(False))
+    if config[CONF_MODEL] == MODEL_RGB62:
+        cg.add(var.set_kelvin_range(2500.0, 8500.0))
+        cg.add(var.set_supports_green_magenta(True))

@@ -92,7 +92,12 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
 
     void dump_config() override;
     void rgb_to_hsb(float red, float green, float blue, int *hue, uint8_t *saturation, uint8_t *brightness);
-    
+    void set_kelvin_range(float min_kelvin, float max_kelvin) {
+      this->kelvin_min_ = min_kelvin;
+      this->kelvin_max_ = max_kelvin;
+    }
+    void set_supports_green_magenta(bool enabled) { this->supports_gm_ = enabled; }
+
   protected:
     float old_red_ = 0.0;
     float old_green_ = 0.0;
@@ -108,6 +113,9 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     uint32_t last_channel_request_ms_ = 0;
     static const uint32_t STATUS_TIMEOUT_MS = 2000;
     bool initial_status_requested_ = false;
+    float kelvin_min_ = 3200.0f;
+    float kelvin_max_ = 5600.0f;
+    bool supports_gm_ = false;
 
     const char* const TAG = "neewer_rgbct_light_output";
 
