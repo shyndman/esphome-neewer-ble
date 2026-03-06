@@ -84,7 +84,7 @@ constexpr size_t NEEWER_SIMPLE_SCENE_COUNT = sizeof(NEEWER_SIMPLE_SCENES) / size
 
 void NeewerBLEOutput::dump_config() {
   ESP_LOGCONFIG(TAG, "Neewer BLE Output:");
-  ESP_LOGCONFIG(TAG, "  MAC address        : %s", this->parent_->address_str().c_str());
+  ESP_LOGCONFIG(TAG, "  MAC address        : %s", this->parent_->address_str());
   ESP_LOGCONFIG(TAG, "  Service UUID       : %s", this->service_uuid_.to_string().c_str());
   ESP_LOGCONFIG(TAG, "  Characteristic UUID: %s", this->char_uuid_.to_string().c_str());
   LOG_BINARY_OUTPUT(this);
@@ -253,7 +253,7 @@ void NeewerBLEOutput::reset_notification_state_() {
 
 void NeewerRGBCTLightOutput::dump_config() {
   ESP_LOGCONFIG(TAG, "Neewer RGBCT Light Output:");
-  ESP_LOGCONFIG(TAG, "  MAC address        : %s", this->parent_->address_str().c_str());
+  ESP_LOGCONFIG(TAG, "  MAC address        : %s", this->parent_->address_str());
   ESP_LOGCONFIG(TAG, "  Service UUID       : %s", this->service_uuid_.to_string().c_str());
   ESP_LOGCONFIG(TAG, "  Characteristic UUID: %s", this->char_uuid_.to_string().c_str());
   ESP_LOGCONFIG(TAG, "  Require Response   : %s", this->require_response_ ? "True" : "False");
@@ -321,7 +321,7 @@ void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float whi
   this->orig_msg_[0] = this->command_prefix_;        // 0x78
   this->orig_msg_[1] = this->ctwb_prefix_;           // 0x86
   if (include_gm) {
-    this->orig_msg_[2] = 4;
+    this->orig_msg_[2] = 5;
     this->orig_msg_[3] = wb;
     this->orig_msg_[4] = ct_byte;
     this->orig_msg_[5] = gm_byte;
@@ -335,7 +335,17 @@ void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float whi
     this->orig_msg_len_ = 5;
   }
 
+  ESP_LOGD(TAG, "CT packet bytes (payload_len=%u): brr=%u ct_byte=0x%02X gm=%u", this->orig_msg_[2], wb, ct_byte,
+           gm_byte);
+  for (uint8_t i = 0; i < this->orig_msg_len_; i++) {
+    ESP_LOGV(TAG, "CT payload[%u] = 0x%02X", i, this->orig_msg_[i]);
+  }
+
   NeewerBLEOutput::build_msg_with_checksum();
+  ESP_LOGD(TAG, "CT msg (len=%u inc checksum)", this->msg_len_);
+  for (uint8_t i = 0; i < this->msg_len_; i++) {
+    ESP_LOGV(TAG, "CT msg[%u] = 0x%02X", i, this->msg_[i]);
+  }
 };
 
 // For whatever reason, the RGB660 will only allow brightness alone if CT hasn't changed
@@ -351,6 +361,8 @@ void NeewerRGBCTLightOutput::prepare_wb_msg(float white_brightness) {
   this->orig_msg_[3] = wb;                           // brightness 0x00 - 0x64
   this->orig_msg_len_ = 4;
   
+  ESP_LOGD(TAG, "WB-only payload (len=%u): brr=%u", this->orig_msg_len_, wb);
+
   NeewerBLEOutput::build_msg_with_checksum();
 };
 
@@ -411,6 +423,9 @@ void NeewerRGBCTLightOutput::prepare_rgb_msg(float red, float green, float blue)
   this->orig_msg_[6] = brightness;                   // brightness 0x00 - 0x64
   this->orig_msg_len_ = 7;
   
+  ESP_LOGD(TAG, "RGB packet bytes (len=%u): hue_lsb=0x%02X hue_msb=0x%02X sat=%u brr=%u", this->orig_msg_len_,
+           this->orig_msg_[3], this->orig_msg_[4], saturation, brightness);
+
   NeewerBLEOutput::build_msg_with_checksum();
 };
 
@@ -501,7 +516,7 @@ void NeewerRGBCTLightOutput::rgb_to_hsb(float red, float green, float blue,
   }
 };
 
-void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
+void NeewerRGBCTLightOutput::write_state(light_ns::LightState *state) {
   // Call original write state to set new values for each state.
   float red, green, blue, color_temperature, white_brightness;
 
@@ -537,7 +552,7 @@ void NeewerRGBCTLightOutput::write_state(light::LightState *state) {
            ctwb_changed ? "CHANGED" : "same",
            rgb_is_zero ? "YES" : "NO",
            wb_is_zero ? "YES" : "NO");
-  
+
   ESP_LOGD(TAG, "Previous values: RGB(%.2f,%.2f,%.2f) CT=%.0fK WB=%.1f%%",
            this->old_red_, this->old_green_, this->old_blue_, 
            this->old_color_temperature_, this->old_white_brightness_ * 100);
@@ -762,6 +777,7 @@ void NeewerRGBCTLightOutput::request_power_status_(bool force) {
   if (!force && this->awaiting_power_status_)
     return;
 
+  ESP_LOGD(TAG, "Requesting power status (force=%s)", force ? "true" : "false");
   this->prepare_status_msg_(POWER_STATUS_REQUEST_TAG);
   this->status_query_active_ = true;
   NeewerBLEOutput::write_state(1.0f);
@@ -776,6 +792,7 @@ void NeewerRGBCTLightOutput::request_channel_status_(bool force) {
   if (!force && this->awaiting_channel_status_)
     return;
 
+  ESP_LOGD(TAG, "Requesting channel status (force=%s)", force ? "true" : "false");
   this->prepare_status_msg_(CHANNEL_STATUS_REQUEST_TAG);
   this->status_query_active_ = true;
   NeewerBLEOutput::write_state(1.0f);
@@ -785,6 +802,7 @@ void NeewerRGBCTLightOutput::request_channel_status_(bool force) {
 }
 
 void NeewerRGBCTLightOutput::request_status_refresh_(bool include_channel) {
+  ESP_LOGD(TAG, "Requesting status refresh (include_channel=%s)", include_channel ? "true" : "false");
   this->request_power_status_();
   if (include_channel) {
     this->request_channel_status_();
@@ -816,6 +834,8 @@ void NeewerRGBCTLightOutput::handle_status_notification_(const uint8_t *data, ui
     return;
   }
 
+  ESP_LOGD(TAG, "Status notification len=%u bytes: type=0x%02X payload=0x%02X", length, data[1], data[3]);
+
   const uint8_t response_type = data[1];
   const uint8_t payload = data[3];
 
@@ -839,6 +859,13 @@ void NeewerRGBCTLightOutput::handle_power_status_response_(uint8_t raw_state) {
     ESP_LOGD(TAG, "Power status confirmed: STANDBY");
   } else {
     ESP_LOGW(TAG, "Unexpected power status value: 0x%02X", raw_state);
+    return;
+  }
+
+  if (this->light_state_ != nullptr) {
+    auto call = this->light_state_->make_call();
+    call.set_state(this->light_on_);
+    call.perform();
   }
 }
 
@@ -867,6 +894,11 @@ void NeewerSceneLightEffect::start() {
   if (output == nullptr)
     return;
   output->activate_scene(this->scene_id_);
+}
+
+void NeewerRGBCTLightOutput::setup_state(light_ns::LightState *state) {
+  rgbct::RGBCTLightOutput::setup_state(state);
+  this->light_state_ = state;
 }
 
 NeewerRGBCTLightOutput::NeewerRGBCTLightOutput() {

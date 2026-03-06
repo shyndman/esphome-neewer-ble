@@ -1,13 +1,14 @@
 #pragma once
 
-#include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
-#include "esphome/components/ble_client/ble_client.h"
-#include "esphome/components/rgbct/rgbct_light_output.h"
-#include "esphome/components/output/float_output.h"
-#include "esphome/components/light/light_effect.h"
-#include "esphome/core/helpers.h"
-#include "esphome/core/component.h"
-#include "esphome/core/log.h"
+#include "../esp32_ble_tracker/esp32_ble_tracker.h"
+#include "../ble_client/ble_client.h"
+#include "../rgbct/rgbct_light_output.h"
+#include "../output/float_output.h"
+#include "../light/light_state.h"
+#include "../light/light_effect.h"
+#include "../../core/helpers.h"
+#include "../../core/component.h"
+#include "../../core/log.h"
 
 #ifdef USE_ESP32
 
@@ -15,6 +16,7 @@ namespace esphome {
 namespace neewerlight {
 
 namespace espbt = esp32_ble_tracker;
+namespace light_ns = ::esphome::light;
 
 static const char *const SERVICE_UUID = "69400001-B5A3-F393-E0A9-E50E24DCCA99";
 static const char *const CHARACTERISTIC_UUID = "69400002-B5A3-F393-E0A9-E50E24DCCA99";
@@ -117,6 +119,7 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
 
     void dump_config() override;
     void rgb_to_hsb(float red, float green, float blue, int *hue, uint8_t *saturation, uint8_t *brightness);
+    void setup_state(light_ns::LightState *state) override;
     void set_kelvin_range(float min_kelvin, float max_kelvin) {
       this->kelvin_min_ = min_kelvin;
       this->kelvin_max_ = max_kelvin;
@@ -149,6 +152,7 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     uint16_t last_hue_degrees_ = 0;
     uint8_t last_saturation_percent_ = 100;
     float last_rgb_brightness_fraction_ = 0.0f;
+    light_ns::LightState *light_state_ = nullptr;
 
     const char* const TAG = "neewer_rgbct_light_output";
 
@@ -183,12 +187,13 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     uint8_t default_sparks_byte_() const;
     uint8_t default_color_byte_() const;
     void set_old_rgbct(float red, float green, float blue, float color_temperature, float white_brightness);
-    void write_state(light::LightState *state) override;
+    void write_state(light_ns::LightState *state) override;
 };
 
-class NeewerSceneLightEffect : public light::LightEffect {
+class NeewerSceneLightEffect : public light_ns::LightEffect {
  public:
-  NeewerSceneLightEffect(const char *name, uint8_t scene_id) : light::LightEffect(name), scene_id_(scene_id) {}
+  NeewerSceneLightEffect(const char *name, uint8_t scene_id)
+      : light_ns::LightEffect(name), scene_id_(scene_id) {}
   void apply() override {}
   void start() override;
 

@@ -36,3 +36,4 @@ These gaps were identified by diffing the actual write paths and inspecting Keef
 - RGB62 is now modeled explicitly: configuration requires `model: rgb62`, which enables the 2500–8500 K mapping, emits the GM byte plus trailing zeros, and keeps legacy behavior for other (future) models.
 - Added a configurable green/magenta bias (–50..50) so CT packets encode the user-selected tint instead of a hardcoded neutral byte; RGB62 currently reads it from YAML and defaults to neutral if unspecified.
 - HA effects now include the first nine RGB62 scene presets (“Neewer FX …”) and selecting one sends the matching `0x78 0x8B` payload with live brightness/CT/GM/Hue parameters pulled from the last state; more complex Infinity-style scenes remain TODO.
+- Boot-time status sync: once the BLE notify channel is up, the driver now issues a light call with the reported on/off state so Home Assistant reflects the hardware state immediately.
