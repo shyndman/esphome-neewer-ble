@@ -157,6 +157,7 @@ class NeewerRGBCTLightOutput : public rgbct::RGBCTLightOutput, public NeewerBLEO
     void loop() override;
     bool did_ctwb_change(float color_temperature, float white_brightness);
     bool did_only_wb_change(float color_temperature, float white_brightness);
+    float normalized_ct_to_kelvin_(float normalized_ct) const;
     void prepare_ctwb_msg(float color_temperature, float white_brightness);
     void prepare_rgb_msg(float red, float green, float blue);
     void prepare_wb_msg(float white_brightness);

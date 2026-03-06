@@ -282,8 +282,19 @@ bool NeewerRGBCTLightOutput::did_only_wb_change(float color_temperature, float w
   return false;  // Neither changed.
 };
 
+float NeewerRGBCTLightOutput::normalized_ct_to_kelvin_(float normalized_ct) const {
+  const float normalized = clamp(normalized_ct, 0.0f, 1.0f);
+  const float mired_span = this->warm_white_temperature_ - this->cold_white_temperature_;
+  const float mired = this->cold_white_temperature_ + (normalized * mired_span);
+  if (mired <= 0.0f) {
+    return (this->kelvin_min_ + this->kelvin_max_) / 2.0f;
+  }
+  return 1000000.0f / mired;
+}
+
 void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float white_brightness) {
-  ESP_LOGD(TAG, "Building CTWB message: CT=%.0fK brightness=%.1f%%", color_temperature, white_brightness * 100);
+  ESP_LOGD(TAG, "Building CTWB message: CT(normalized)=%.3f brightness=%.1f%%", color_temperature,
+           white_brightness * 100);
   
   uint8_t wb = (uint8_t) (white_brightness * 100.0);
   uint8_t ct_byte;
@@ -291,16 +302,17 @@ void NeewerRGBCTLightOutput::prepare_ctwb_msg(float color_temperature, float whi
   bool include_gm = this->supports_gm_;
 
   if (include_gm) {
-    const float clamped_kelvin = clamp(color_temperature, this->kelvin_min_, this->kelvin_max_);
+    const float converted_kelvin = this->normalized_ct_to_kelvin_(color_temperature);
+    const float clamped_kelvin = clamp(converted_kelvin, this->kelvin_min_, this->kelvin_max_);
     const float span = this->kelvin_max_ - this->kelvin_min_;
     const float normalized = span > 0.0f ? (clamped_kelvin - this->kelvin_min_) / span : 0.0f;
     ct_byte = static_cast<uint8_t>(roundf(normalized * 60.0f) + 25.0f);
     gm_byte = static_cast<uint8_t>(roundf(clamp(this->green_magenta_bias_ + 50.0f, 0.0f, 100.0f)));
-    ESP_LOGD(TAG, "Converted RGB62 CT=%.0fK -> byte=%u GM=%u (bias %.1f)", clamped_kelvin, ct_byte, gm_byte,
-             this->green_magenta_bias_);
+    ESP_LOGD(TAG, "Converted RGB62 CT normalized=%.3f -> kelvin=%.0fK -> byte=%u GM=%u (bias %.1f)",
+             color_temperature, clamped_kelvin, ct_byte, gm_byte, this->green_magenta_bias_);
   } else {
     ct_byte = (uint8_t) abs((color_temperature * 24.0f) - 56.0f);
-    ESP_LOGD(TAG, "Converted legacy CT=0x%02X", ct_byte);
+    ESP_LOGD(TAG, "Converted legacy CT normalized=%.3f -> byte=0x%02X", color_temperature, ct_byte);
   }
 
   this->orig_msg_clear();
@@ -626,6 +638,7 @@ bool NeewerRGBCTLightOutput::build_scene_message_(const NeewerSceneDefinition &d
   this->orig_msg_[0] = this->command_prefix_;
   this->orig_msg_[1] = FX_SUBTAG;
   uint8_t index = 3;
+  const float scene_kelvin = this->normalized_ct_to_kelvin_(this->old_color_temperature_);
   this->orig_msg_[index++] = definition.scene_id;
 
   for (uint8_t i = 0; i < definition.param_count; i++) {
@@ -638,10 +651,10 @@ bool NeewerRGBCTLightOutput::build_scene_message_(const NeewerSceneDefinition &d
         this->orig_msg_[index++] = this->current_brightness_byte_(true);
         break;
       case NeewerSceneParamKind::CCT:
-        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(this->old_color_temperature_);
+        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(scene_kelvin);
         break;
       case NeewerSceneParamKind::CCT2:
-        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(this->old_color_temperature_);
+        this->orig_msg_[index++] = this->convert_kelvin_to_scene_byte_(scene_kelvin);
         break;
       case NeewerSceneParamKind::GM:
         this->orig_msg_[index++] = this->gm_bias_byte_();

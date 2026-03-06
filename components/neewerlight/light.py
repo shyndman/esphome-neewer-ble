@@ -18,6 +18,11 @@ CONF_GREEN_MAGENTA_BIAS = "green_magenta_bias"
 CONF_MODEL = "model"
 MODEL_RGB62 = "rgb62"
 
+RGB62_MIN_KELVIN = 2500.0
+RGB62_MAX_KELVIN = 8500.0
+RGB62_COLD_WHITE_MIRED = 1_000_000.0 / RGB62_MAX_KELVIN
+RGB62_WARM_WHITE_MIRED = 1_000_000.0 / RGB62_MIN_KELVIN
+
 neewerlight_ns = cg.esphome_ns.namespace("neewerlight")
 
 NeewerSceneLightEffect = neewerlight_ns.class_("NeewerSceneLightEffect", LightEffect)
@@ -111,5 +116,7 @@ async def to_code(config):
     cg.add(var.set_supports_green_magenta(False))
     cg.add(var.set_green_magenta_bias(config[CONF_GREEN_MAGENTA_BIAS]))
     if config[CONF_MODEL] == MODEL_RGB62:
-        cg.add(var.set_kelvin_range(2500.0, 8500.0))
+        cg.add(var.set_kelvin_range(RGB62_MIN_KELVIN, RGB62_MAX_KELVIN))
+        cg.add(var.set_cold_white_temperature(RGB62_COLD_WHITE_MIRED))
+        cg.add(var.set_warm_white_temperature(RGB62_WARM_WHITE_MIRED))
         cg.add(var.set_supports_green_magenta(True))
